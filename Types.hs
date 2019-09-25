@@ -1,4 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 module Types where
@@ -72,13 +71,13 @@ data Effect
     | Offset { pages :: PageCount }
     | VolumeSlide { volumeDelta :: Int, continuedEffect :: Maybe ContinuedEffect }
     | PositionJump { position :: SongPosition }
-    | SetVolume { volume :: Int }
-    | PatternBreak { rowIndex :: Int }
+    | SetVolume { newVolume :: Int }
+    | PatternBreak { newRowIndex :: Int }
     | FilterControl { state :: FilterState }
     | GlissandoControl { mode :: GlissandoMode }
     | SetVibratoWaveform { options :: WaveformOptions }
     | SetTremoloWaveform { options :: WaveformOptions }
-    | SetFinetune { finetune :: Int }
+    | SetFinetune { newFinetune :: Int }
     | LoopStart
     | LoopEnd { times :: Int }
     | RetriggerSample { ticks :: Int }
@@ -86,8 +85,8 @@ data Effect
     | CutSample { ticks :: Int }
     | DelaySample { ticks :: Int }
     | DelayPattern { delayRows :: Int }
-    | SetTicksPerRow { ticks :: Int }
-    | SetTempo { tempo :: Int }
+    | SetTicksPerRow { newTicksPerRow :: Int }
+    | SetTempo { newTempo :: Int }
     | UnknownEffect { effectNumber :: Int, argument :: Int }
     deriving (Eq, Ord, Show, Generic, NFData)
 
@@ -114,5 +113,6 @@ data Module =
         , patternTable :: Array SongPosition PatternIndex
         , patterns :: Array PatternIndex Pattern
         , samples :: Array SampleIndex SampleWave
+        , channelCount :: Int
         }
     deriving (Eq, Ord, Show, Generic, NFData)

@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Parse where
@@ -77,6 +76,7 @@ pModule = do
     let patternCount = maximum patternTable + 1
     patterns <- pArray 0 patternCount pPattern
     samples  <- forM sampleInfos $ \SampleInfo { length } -> P.take (2 * length)
+    let channelCount = 4
     pure $ Module title
                   sampleInfos
                   songPositionCount
@@ -84,3 +84,4 @@ pModule = do
                   patternTable
                   patterns
                   samples
+                  channelCount
