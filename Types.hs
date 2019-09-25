@@ -4,8 +4,8 @@
 module Types where
 import           Data.Array                     ( Array )
 import           Data.ByteString                ( ByteString )
-import GHC.Generics (Generic)
-import Control.DeepSeq
+import           GHC.Generics                   ( Generic )
+import           Control.DeepSeq
 
 type WordCount = Int
 type PageCount = Int
