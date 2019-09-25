@@ -1,8 +1,11 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 module Types where
 import           Data.Array                     ( Array )
 import           Data.ByteString                ( ByteString )
+import GHC.Generics (Generic)
+import Control.DeepSeq
 
 type WordCount = Int
 type PageCount = Int
@@ -24,41 +27,41 @@ data SampleInfo =
         , repeatOffset :: WordCount
         , repeatLength :: WordCount
         }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data SlideDirection = Up | Down | Approach
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data ContinuedEffect
     = ContinuePitch
     | ContinueVibrato
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data FilterState
     = FilterOff
     | FilterOn
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data GlissandoMode
     = InSemitones
     | Smooth
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data Waveform
     = SineWave
     | RampDown
     | SquareWave
     | RandomWave
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data WaveformBehavior
     = ResetPhaseOnNewNote
     | KeepPhaseOnNewNote
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data WaveformOptions
     = WaveformOptions { waveform :: Waveform, behavior :: WaveformBehavior }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data Effect
     = NoEffect
@@ -86,19 +89,19 @@ data Effect
     | SetTicksPerRow { ticks :: Int }
     | SetTempo { tempo :: Int }
     | UnknownEffect { effectNumber :: Int, argument :: Int }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data Instruction =
     Instruction { sample :: SampleIndex, period :: Period, effect :: Effect }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data Row =
     Row { instructions :: Array ChannelIndex Instruction }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 data Pattern =
     Pattern { rows :: Array RowIndex Row }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)
 
 type SampleWave = ByteString
 
@@ -112,4 +115,4 @@ data Module =
         , patterns :: Array PatternIndex Pattern
         , samples :: Array SampleIndex SampleWave
         }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic, NFData)

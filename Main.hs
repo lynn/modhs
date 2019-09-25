@@ -4,10 +4,12 @@
 
 import qualified Data.ByteString               as B
 import qualified Data.Attoparsec.ByteString    as P
+import           Criterion.Main
 import           System.Environment
 import           System.IO
 import           System.Exit
 import           Data.Array                     ( (!), elems )
+
 import           Types
 import           Parse
 
@@ -16,19 +18,7 @@ main = do
     args <- getArgs
     case args of
         [path] -> do
-            contents <- B.readFile path
-            case P.parse pModule contents of
-                P.Fail b ctxs why -> do
-                    putStrLn "Fail"
-                    print (B.take 20 b)
-                    print ctxs
-                    print why
-                P.Done b m -> do
-                    putStrLn "Done"
-                    print (B.take 20 b)
-                    mapM_ print (sampleInfos m)
-                P.Partial _ -> do
-                    putStrLn "Partial"
+            defaultMain [bench path $ nfIO (P.parse pModule <$> B.readFile path)]
         _ -> do
             progName <- getProgName
             hPutStrLn stderr ("usage: " ++ progName ++ " input.mod")

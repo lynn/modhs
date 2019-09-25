@@ -16,8 +16,8 @@ import           Control.Monad
 import           Types
 import           Data.Bits
 
-pSignature31 :: Parser ()
-pSignature31 = void
+pSignature :: Parser ()
+pSignature = void
     (P.string "M.K." <|> P.string "4CHN" <|> P.string "M!K!" <|> P.string "FLT4"
     )
 
@@ -73,7 +73,7 @@ pModule = do
     songPositionCount <- P.u8
     restartPosition   <- P.u8
     patternTable      <- pArray 0 128 P.u8
-    pSignature31
+    pSignature
     let patternCount = maximum patternTable + 1
     patterns <- pArray 0 patternCount pPattern
     samples  <- forM sampleInfos $ \SampleInfo { length } -> P.take (2 * length)
