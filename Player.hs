@@ -5,7 +5,6 @@
 
 module Player where
 
-import           Constants
 import           Control.Monad
 import           Control.Monad.RWS
 import           Data.Array
@@ -14,25 +13,31 @@ import           Data.Vector                    ( Vector )
 import           Data.Word
 import           Debug.Trace
 import           Prelude                 hiding ( pi )
-import           Types
 import qualified Data.ByteString               as B
 import qualified Data.Vector                   as V
 
-instructionAt
-    :: PatternIndex -> RowIndex -> ChannelIndex -> Module -> Instruction
-instructionAt pi ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
+import           Constants
+import           Types
+import           Render
 
+--------------------
+-- Definitions
+--------------------
+
+-- The .MOD playback monad context.
 type Playback m = MonadRWS Module [ByteString] PlayerState m
 
+-- A sound being played on a channel.
 data Sound =
     Sound
         { soundSample :: SampleIndex
         , soundPeriod :: Int
         , soundVolume :: Int
-        , soundWord :: Int
+        , soundTime :: Int -- How far into the sample waveform are we?
         }
     deriving (Eq, Ord, Show)
 
+-- Silence.
 noSound :: Sound
 noSound = Sound 0 0 0 0
 
@@ -61,6 +66,20 @@ initialPlayerState numChannels = PlayerState
     , sounds       = V.replicate numChannels noSound
     }
 
+-- A helper function to fetch an instruction.
+instructionAt
+    :: PatternIndex -> RowIndex -> ChannelIndex -> Module -> Instruction
+instructionAt pi ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
+
+-- A helper function to update one of the sound values in the player state.
+setSound :: Playback m => ChannelIndex -> Sound -> m ()
+setSound ci sound = do
+    modify (\ps -> ps { sounds = sounds ps V.// [(ci, sound)] })
+
+--------------------
+-- Interpret module data.
+--------------------
+
 interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
 interpretEffect ci effect = case effect of
     NoEffect -> pure ()
@@ -73,14 +92,52 @@ interpretRow = do
     infos <- asks sampleInfos
     forM_ [0 .. cs - 1] $ \ci -> do
         sounds <- gets sounds
-        let Sound s p v w = sounds V.! ci
+        let Sound s p v t = sounds V.! ci
         Instruction ins inp effect <- asks (instructionAt pi ri ci)
         let s' = if ins == 0 then s else ins
         let p' = if inp == 0 then p else inp
         let v' = if ins == 0 then v else volume (infos ! ins)
-        let w' = if inp == 0 then w else 0
-        modify (\ps -> ps { sounds = sounds V.// [(ci, Sound s' p' v' w')] })
+        let t' = if inp == 0 then t else 0
+        setSound ci (Sound s' p' v' t')
         interpretEffect ci effect
+
+-- Return a function for indexing into sample s's waveform in a properly looping/cutting fashion.
+waveFunction :: Playback m => SampleIndex -> m (Int -> Int)
+waveFunction s = do
+    wave <- asks ((! s) . sampleWaves)
+    info <- asks ((! s) . sampleInfos)
+    let (ro, rl) = (repeatOffset info, repeatLength info)
+    let f i | rl > 2 && i < ro  = wave V.! i
+            | rl > 2            = wave V.! (ro + (i - ro) `mod` rl)
+            | i < V.length wave = wave V.! i
+            | otherwise         = 0
+    pure f
+
+palSampleRate :: Int -> Double
+palSampleRate period = palClockRate / (4.0 * fromIntegral period) -- TODO: why the 4? should be 2
+
+playChannel :: Playback m => Double -> ChannelIndex -> m (Vector Int)
+playChannel seconds ci = do
+    sound@(Sound sampleIndex period volume t0) <- gets ((V.! ci) . sounds)
+    let n = round (seconds * outputSampleRate)
+    if (sampleIndex == 0 || period == 0)
+        then pure (V.replicate n 0)
+        else do
+            -- Resampling. Suppose we are outputting 44100 Hz audio, and this sample must be played back at 8000Hz.
+            -- Then we should "stretch out" the sample by a factor 44100/8000, which means we index its waveform
+            -- at k=8000/44100 increments rounded to the nearest integer: [0,0,0,1,1,1,1,1,1,2,2,2,2,2,3,3...]
+            wave <- waveFunction sampleIndex
+            let k = palSampleRate period / outputSampleRate
+            let t i = t0 + round (k * fromIntegral i)
+            let resampled = V.generate n ((* volume) . wave . t)
+
+            -- Advance this sound's time value.
+            setSound ci sound { soundTime = t n }
+            pure resampled
+
+--------------------
+-- Advance player state.
+--------------------
 
 nextTick :: Playback m => m ()
 nextTick = do
@@ -104,57 +161,26 @@ nextPattern = do
     let pi' = (pi + 1) `mod` pc
     modify (\ps -> ps { patternIndex = pi' })
 
-playSample :: Playback m => Double -> ChannelIndex -> m (Vector Int)
-playSample seconds ci = do
-    sounds      <- gets sounds
-    sampleInfos <- asks sampleInfos
-    sampleWaves <- asks sampleWaves
-    let n = round (seconds * outputBitRate)
-    case sounds V.! ci of
-        Sound 0 _ _ _ -> pure (V.replicate n 0)
-        Sound _ 0 _ _ -> pure (V.replicate n 0)
-        Sound s p v w -> do
-            let wave = sampleWaves ! s
-            let info = sampleInfos ! s
-            let ro   = repeatOffset info
-            let rl   = repeatLength info
-            let sampleAt i | rl > 2 && i < ro  = wave V.! i
-                           | rl > 2 = wave V.! (ro + (i - ro) `mod` rl)
-                           | i < V.length wave = wave V.! i
-                           | otherwise         = 0
-            let rate = palClockRate / (4.0 * fromIntegral p) -- why the 4? should be 2
-            let k    = rate / outputBitRate
-            let sampleIndexAt i = w + round (k * fromIntegral i)
-            let resampled = V.generate n (sampleAt . sampleIndexAt)
-            let w'        = sampleIndexAt n
-            -- Update this sound's w.
-            modify (\ps -> ps { sounds = sounds V.// [(ci, Sound s p v w')] })
-            pure resampled
-
-toSigned16 :: Int -> [Word8]
-toSigned16 i
-    | i > 0x7FFF    = toSigned16 0x7FFF
-    | i < (-0x8000) = toSigned16 (-0x8000)
-    | i >= 0        = map fromIntegral [i `div` 256, i `mod` 256]
-    | otherwise     = map fromIntegral [(i + 0x10000) `div` 256, i `mod` 256]
+--------------------
+-- Main interpret-play-mix-tell action.
+--------------------
 
 playTick :: Playback m => m ()
 playTick = do
-    t <- gets tick
-    when (t == 0) interpretRow
+    t       <- gets tick
     seconds <- gets tickSeconds
     cs      <- asks channelCount
-    audios  <- mapM (playSample seconds) [0 .. cs - 1]
-    let mixed = fmap (`div` 4) $ foldl1 (V.zipWith (+)) audios
-    let bytes = B.pack (concatMap (reverse . toSigned16) mixed)
-    tell [bytes]
+    when (t == 0) interpretRow
+    channelAudios <- mapM (playChannel seconds) [0 .. cs - 1]
+    tell [mixAndRender channelAudios]
     nextTick
 
+-- IO monad interface to playing a module.
 
 playModule :: Module -> Int -> IO ()
 playModule m ticks = do
     let initialState       = initialPlayerState (channelCount m)
     let (finalState, pcms) = execRWS (replicateM ticks playTick) m initialState
     let pcm                = pcms `seq` B.concat pcms
-    -- let pcm = B.pack . concatMap toSigned16 . V.toList . (!1) . sampleWaves $ m
+    print finalState
     B.writeFile "output.pcm" pcm
