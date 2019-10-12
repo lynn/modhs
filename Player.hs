@@ -41,14 +41,18 @@ data Sound =
 noSound :: Sound
 noSound = Sound 0 0 0 0
 
+data Jump = Jump SongPosition RowIndex
+    deriving (Eq, Ord, Show)
+
 data PlayerState =
     PlayerState
-        { songPosition :: SongPosition
-        , rowIndex     :: RowIndex
-        , tick         :: Int
-        , ticksPerRow  :: Int
-        , tempo        :: Int
-        , sounds       :: Vector Sound
+        { songPosition  :: SongPosition
+        , rowIndex      :: RowIndex
+        , tick          :: Int
+        , ticksPerRow   :: Int
+        , tempo         :: Int
+        , sounds        :: Vector Sound
+        , scheduledJump :: Maybe Jump
         }
     deriving (Eq, Ord, Show)
 
@@ -62,12 +66,13 @@ finetuneFactor SampleInfo { finetune } =
 
 initialPlayerState :: Int -> PlayerState
 initialPlayerState numChannels = PlayerState
-    { songPosition = 0
-    , rowIndex     = 0
-    , tick         = 0
-    , ticksPerRow  = initialTicksPerRow
-    , tempo        = initialTempo
-    , sounds       = V.replicate numChannels noSound
+    { songPosition  = 0
+    , rowIndex      = 0
+    , tick          = 0
+    , ticksPerRow   = initialTicksPerRow
+    , tempo         = initialTempo
+    , sounds        = V.replicate numChannels noSound
+    , scheduledJump = Nothing
     }
 
 -- A helper function to fetch an instruction.
@@ -86,19 +91,49 @@ modifySound ci f =
     modify (\ps -> ps { sounds = sounds ps V.// [(ci, f $ sounds ps V.! ci)] })
 
 --------------------
+-- Jumps
+--------------------
+
+executeScheduledJump :: Playback m => m ()
+executeScheduledJump = do
+    sj <- gets scheduledJump
+    forM_ sj $ \(Jump sp ri) ->
+        modify (\ps -> ps { songPosition = sp, rowIndex = ri })
+    modify (\ps -> ps { scheduledJump = Nothing })
+
+scheduleJump :: Playback m => Jump -> m ()
+scheduleJump jump = modify (\ps -> ps { scheduledJump = Just jump })
+
+-- Schedule a position jump (Bxx) to be executed on the next row.
+schedulePositionJump :: Playback m => Int -> m ()
+schedulePositionJump sp = do
+    spc <- asks songPositionCount
+    when (sp < spc) $ scheduleJump (Jump sp 0)
+
+-- Schedule a pattern break (Dxx) to be executed on the next row.
+schedulePatternBreak :: Playback m => Int -> m ()
+schedulePatternBreak ri = do
+    sp <- nextSongPosition
+    let sp' = (sp + 1) `mod` spc
+    when (ri < rowsPerPattern) $ scheduleJump (Jump sp' ri)
+
+--------------------
 -- Interpret module data.
 --------------------
 
 interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
 interpretEffect ci effect = case effect of
-    NoEffect         -> pure ()
-    SetVolume      v -> modifySound ci (\s -> s { soundVolume = v })
-    SetTempo       t -> modify (\ps -> ps { tempo = t })
-    SetTicksPerRow t -> modify (\ps -> ps { ticksPerRow = t })
-    _                -> pure ()
+    NoEffect          -> pure ()
+    PositionJump   sp -> schedulePositionJump sp
+    SetVolume      v  -> modifySound ci (\s -> s { soundVolume = v })
+    PatternBreak   ri -> schedulePatternBreak ri
+    SetTempo       t  -> modify (\ps -> ps { tempo = t })
+    SetTicksPerRow t  -> modify (\ps -> ps { ticksPerRow = t })
+    _                 -> pure ()
 
 interpretRow :: Playback m => m ()
 interpretRow = do
+    executeScheduledJump
     PlayerState { songPosition = sp, rowIndex = ri } <- get
     cs    <- asks channelCount
     infos <- asks sampleInfos
@@ -152,26 +187,30 @@ playChannel seconds ci = do
 -- Advance player state.
 --------------------
 
-nextTick :: Playback m => m ()
-nextTick = do
+advanceTick :: Playback m => m ()
+advanceTick = do
     t   <- gets tick
     tpr <- gets ticksPerRow
     let t' = (t + 1) `mod` tpr
-    when (t' == 0) nextRow
+    when (t' == 0) advanceRow
     modify (\ps -> ps { tick = t' })
 
-nextRow :: Playback m => m ()
-nextRow = do
+advanceRow :: Playback m => m ()
+advanceRow = do
     ri <- gets rowIndex
     let ri' = (ri + 1) `mod` rowsPerPattern
-    when (ri' == 0) nextPosition
+    when (ri' == 0) advancePosition
     modify (\ps -> ps { rowIndex = ri' })
 
-nextPosition :: Playback m => m ()
-nextPosition = do
+nextSongPosition :: Playback m => m SongPosition
+nextSongPosition = do
     sp  <- gets songPosition
     spc <- asks songPositionCount
-    let sp' = (sp + 1) `mod` spc
+    pure $ (sp + 1) `mod` spc
+
+advancePosition :: Playback m => m ()
+advancePosition = do
+    sp' <- nextSongPosition
     modify (\ps -> ps { songPosition = sp' })
 
 --------------------
@@ -186,7 +225,7 @@ playTick = do
     when (t == 0) interpretRow
     channelAudios <- mapM (playChannel seconds) [0 .. cs - 1]
     tell [mixAndRender channelAudios]
-    nextTick
+    advanceTick
 
 -- IO monad interface to playing a module.
 
