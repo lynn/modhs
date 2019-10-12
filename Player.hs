@@ -56,6 +56,10 @@ tickSeconds :: PlayerState -> Double
 tickSeconds PlayerState { tempo } =
     0.02 * fromIntegral initialTempo / fromIntegral tempo
 
+finetuneFactor :: SampleInfo -> Double
+finetuneFactor SampleInfo { finetune } =
+    let semitones = fromIntegral finetune / 8 in 2 ** (semitones / 12)
+
 initialPlayerState :: Int -> PlayerState
 initialPlayerState numChannels = PlayerState
     { songPosition = 0
@@ -69,13 +73,12 @@ initialPlayerState numChannels = PlayerState
 -- A helper function to fetch an instruction.
 instructionAt
     :: SongPosition -> RowIndex -> ChannelIndex -> Module -> Instruction
-instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! (ri `xor` 24)) ! ci
+instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
     where pi = patternTable m ! sp
 
 -- A helper function to set one of the sound values in the player state.
-setSound :: Playback m  => ChannelIndex -> Sound -> m ()
-setSound ci sound =
-    modifySound ci (const sound)
+setSound :: Playback m => ChannelIndex -> Sound -> m ()
+setSound ci sound = modifySound ci (const sound)
 
 -- A helper function to modify one of the sound values in the player state.
 modifySound :: Playback m => ChannelIndex -> (Sound -> Sound) -> m ()
@@ -136,8 +139,9 @@ playChannel seconds ci = do
             -- Then we should "stretch out" the sample by a factor 44100/8000, which means we index its waveform
             -- at k=8000/44100 increments rounded to the nearest integer: [0,0,0,1,1,1,1,1,1,2,2,2,2,2,3,3...]
             wave <- waveFunction sampleIndex
-            let k = palSampleRate period / outputSampleRate
-            let t i = t0 + round (k * fromIntegral i)
+            ff   <- asks (finetuneFactor . (! sampleIndex) . sampleInfos)
+            let freq = palSampleRate period * ff
+            let t i = t0 + round (freq / outputSampleRate * fromIntegral i)
             let resampled = V.generate n ((* volume) . wave . t)
 
             -- Advance this sound's time value.
@@ -165,7 +169,7 @@ nextRow = do
 
 nextPosition :: Playback m => m ()
 nextPosition = do
-    sp <- gets songPosition
+    sp  <- gets songPosition
     spc <- asks songPositionCount
     let sp' = (sp + 1) `mod` spc
     modify (\ps -> ps { songPosition = sp' })
