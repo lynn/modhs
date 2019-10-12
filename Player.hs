@@ -33,7 +33,7 @@ data Sound =
         { soundSample :: SampleIndex
         , soundPeriod :: Int
         , soundVolume :: Int
-        , soundTime :: Int -- How far into the sample waveform are we?
+        , soundTime   :: Int -- How far into the sample waveform are we?
         }
     deriving (Eq, Ord, Show)
 
@@ -44,11 +44,11 @@ noSound = Sound 0 0 0 0
 data PlayerState =
     PlayerState
         { songPosition :: SongPosition
-        , rowIndex :: RowIndex
-        , tick :: Int
-        , ticksPerRow :: Int
-        , tempo :: Int
-        , sounds :: Vector Sound
+        , rowIndex     :: RowIndex
+        , tick         :: Int
+        , ticksPerRow  :: Int
+        , tempo        :: Int
+        , sounds       :: Vector Sound
         }
     deriving (Eq, Ord, Show)
 

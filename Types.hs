@@ -7,23 +7,23 @@ import           Data.ByteString                ( ByteString )
 import           GHC.Generics                   ( Generic )
 import           Control.DeepSeq
 
-type WordCount = Int
-type PageCount = Int
-type SongPosition = Int
-type PatternIndex = Int
-type SampleIndex = Int
+type WordCount     = Int
+type PageCount     = Int
+type SongPosition  = Int
+type PatternIndex  = Int
+type SampleIndex   = Int
 type SemitoneDelta = Int
-type ChannelIndex = Int
-type RowIndex = Int
-type Period = Int
-type PeriodDelta = Int
+type ChannelIndex  = Int
+type RowIndex      = Int
+type Period        = Int
+type PeriodDelta   = Int
 
 data SampleInfo =
     SampleInfo
-        { name :: ByteString
-        , length :: WordCount
-        , finetune :: Int
-        , volume :: Int
+        { name         :: ByteString
+        , length       :: WordCount
+        , finetune     :: Int
+        , volume       :: Int
         , repeatOffset :: WordCount
         , repeatLength :: WordCount
         }
@@ -107,13 +107,13 @@ type SampleWave = Vector Int
 
 data Module =
     Module
-        { title :: ByteString
-        , sampleInfos :: Array SampleIndex SampleInfo
+        { title             :: ByteString
+        , sampleInfos       :: Array SampleIndex SampleInfo
         , songPositionCount :: Int
-        , restartPosition :: SongPosition
-        , patternTable :: Array SongPosition PatternIndex
-        , patterns :: Array PatternIndex Pattern
-        , sampleWaves :: Array SampleIndex SampleWave
-        , channelCount :: Int
+        , restartPosition   :: SongPosition
+        , patternTable      :: Array SongPosition PatternIndex
+        , patterns          :: Array PatternIndex Pattern
+        , sampleWaves       :: Array SampleIndex SampleWave
+        , channelCount      :: Int
         }
     deriving (Eq, Ord, Show, Generic, NFData)
