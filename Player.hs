@@ -8,9 +8,9 @@ module Player where
 import           Control.Monad
 import           Control.Monad.RWS
 import           Data.Array
+import           Data.Bits
 import           Data.ByteString                ( ByteString )
 import           Data.Vector                    ( Vector )
-import           Data.Word
 import           Debug.Trace
 import           Prelude                 hiding ( pi )
 import qualified Data.ByteString               as B
@@ -69,17 +69,17 @@ initialPlayerState numChannels = PlayerState
 -- A helper function to fetch an instruction.
 instructionAt
     :: SongPosition -> RowIndex -> ChannelIndex -> Module -> Instruction
-instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
+instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! (ri `xor` 24)) ! ci
     where pi = patternTable m ! sp
 
 -- A helper function to set one of the sound values in the player state.
-setSound :: Playback m => ChannelIndex -> Sound -> m ()
-setSound ci sound = do
+setSound :: Playback m  => ChannelIndex -> Sound -> m ()
+setSound ci sound =
     modifySound ci (const sound)
 
 -- A helper function to modify one of the sound values in the player state.
 modifySound :: Playback m => ChannelIndex -> (Sound -> Sound) -> m ()
-modifySound ci f = do
+modifySound ci f =
     modify (\ps -> ps { sounds = sounds ps V.// [(ci, f $ sounds ps V.! ci)] })
 
 --------------------
@@ -129,7 +129,7 @@ playChannel :: Playback m => Double -> ChannelIndex -> m (Vector Int)
 playChannel seconds ci = do
     Sound sampleIndex period volume t0 <- gets ((V.! ci) . sounds)
     let n = round (seconds * outputSampleRate)
-    if (sampleIndex == 0 || period == 0)
+    if sampleIndex == 0 || period == 0
         then pure (V.replicate n 0)
         else do
             -- Resampling. Suppose we are outputting 44100 Hz audio, and this sample must be played back at 8000Hz.

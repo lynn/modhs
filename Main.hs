@@ -1,7 +1,3 @@
-{-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
-
 import qualified Data.ByteString               as B
 import qualified Data.Attoparsec.ByteString    as P
 import           Criterion.Main

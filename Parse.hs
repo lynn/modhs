@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{- HLINT ignore "Use <$>" -}
 
 module Parse where
 

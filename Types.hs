@@ -95,11 +95,11 @@ data Instruction =
     Instruction { sample :: SampleIndex, period :: Period, effect :: Effect }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-data Row =
+newtype Row =
     Row { instructions :: Array ChannelIndex Instruction }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-data Pattern =
+newtype Pattern =
     Pattern { rows :: Array RowIndex Row }
     deriving (Eq, Ord, Show, Generic, NFData)
 
