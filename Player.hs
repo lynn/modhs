@@ -71,10 +71,15 @@ instructionAt
     :: PatternIndex -> RowIndex -> ChannelIndex -> Module -> Instruction
 instructionAt pi ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
 
--- A helper function to update one of the sound values in the player state.
+-- A helper function to set one of the sound values in the player state.
 setSound :: Playback m => ChannelIndex -> Sound -> m ()
 setSound ci sound = do
-    modify (\ps -> ps { sounds = sounds ps V.// [(ci, sound)] })
+    modifySound ci (const sound)
+
+-- A helper function to modify one of the sound values in the player state.
+modifySound :: Playback m => ChannelIndex -> (Sound -> Sound) -> m ()
+modifySound ci f = do
+    modify (\ps -> ps { sounds = sounds ps V.// [(ci, f $ sounds ps V.! ci)] })
 
 --------------------
 -- Interpret module data.
@@ -82,8 +87,9 @@ setSound ci sound = do
 
 interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
 interpretEffect ci effect = case effect of
-    NoEffect -> pure ()
-    _        -> pure ()
+    NoEffect    -> pure ()
+    SetVolume v -> modifySound ci (\s -> s { soundVolume = v })
+    _           -> pure ()
 
 interpretRow :: Playback m => m ()
 interpretRow = do
@@ -118,7 +124,7 @@ palSampleRate period = palClockRate / (4.0 * fromIntegral period) -- TODO: why t
 
 playChannel :: Playback m => Double -> ChannelIndex -> m (Vector Int)
 playChannel seconds ci = do
-    sound@(Sound sampleIndex period volume t0) <- gets ((V.! ci) . sounds)
+    Sound sampleIndex period volume t0 <- gets ((V.! ci) . sounds)
     let n = round (seconds * outputSampleRate)
     if (sampleIndex == 0 || period == 0)
         then pure (V.replicate n 0)
@@ -132,7 +138,7 @@ playChannel seconds ci = do
             let resampled = V.generate n ((* volume) . wave . t)
 
             -- Advance this sound's time value.
-            setSound ci sound { soundTime = t n }
+            modifySound ci (\s -> s { soundTime = t n })
             pure resampled
 
 --------------------

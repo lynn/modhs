@@ -36,7 +36,15 @@ pArray start count p =
     listArray (start, start + fromIntegral count - 1) <$> P.count count p
 
 decodeEffect :: Int -> Int -> Effect
-decodeEffect e a = UnknownEffect e a
+-- TODO 6789ABDEF
+decodeEffect 0x0 x = Arpeggio (x `div` 16) (x `mod` 16)
+decodeEffect 0x1 x = Slide Up x
+decodeEffect 0x2 x = Slide Down x
+decodeEffect 0x3 x = Slide Approach x
+decodeEffect 0x4 x = Vibrato (x `div` 16) (x `mod` 16)
+decodeEffect 0x5 x = Tremolo (x `div` 16) (x `mod` 16)
+decodeEffect 0xC x = SetVolume x
+decodeEffect e   x = UnknownEffect e x
 
 pInstruction :: Parser Instruction
 pInstruction = do
