@@ -2,6 +2,7 @@
 
 module Types where
 import           Data.Array                     ( Array )
+import           Data.Vector                    ( Vector )
 import           Data.ByteString                ( ByteString )
 import           GHC.Generics                   ( Generic )
 import           Control.DeepSeq
@@ -102,7 +103,7 @@ data Pattern =
     Pattern { rows :: Array RowIndex Row }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-type SampleWave = ByteString
+type SampleWave = Vector Int
 
 data Module =
     Module
@@ -112,7 +113,7 @@ data Module =
         , restartPosition :: SongPosition
         , patternTable :: Array SongPosition PatternIndex
         , patterns :: Array PatternIndex Pattern
-        , samples :: Array SampleIndex SampleWave
+        , sampleWaves :: Array SampleIndex SampleWave
         , channelCount :: Int
         }
     deriving (Eq, Ord, Show, Generic, NFData)

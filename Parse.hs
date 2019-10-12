@@ -10,6 +10,7 @@ import qualified Data.Attoparsec.ByteString    as P
 import           Data.Attoparsec.ByteString     ( Parser )
 import qualified ParseBinary                   as P
 import           Data.Array.IArray
+import qualified Data.Vector                   as V
 import           Control.Applicative
 import           Control.Monad
 import           Types
@@ -75,7 +76,7 @@ pModule = do
     pSignature
     let patternCount = maximum patternTable + 1
     patterns <- pArray 0 patternCount pPattern
-    samples  <- forM sampleInfos $ \SampleInfo { length } -> P.take (2 * length)
+    samples  <- forM sampleInfos $ \si -> V.replicateM (length si) P.i16
     let channelCount = 4
     pure $ Module title
                   sampleInfos
