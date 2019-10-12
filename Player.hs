@@ -87,9 +87,11 @@ modifySound ci f = do
 
 interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
 interpretEffect ci effect = case effect of
-    NoEffect    -> pure ()
-    SetVolume v -> modifySound ci (\s -> s { soundVolume = v })
-    _           -> pure ()
+    NoEffect         -> pure ()
+    SetVolume      v -> modifySound ci (\s -> s { soundVolume = v })
+    SetTempo       t -> modify (\ps -> ps { tempo = t })
+    SetTicksPerRow t -> modify (\ps -> ps { ticksPerRow = t })
+    _                -> pure ()
 
 interpretRow :: Playback m => m ()
 interpretRow = do

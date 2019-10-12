@@ -37,14 +37,16 @@ pArray start count p =
 
 decodeEffect :: Int -> Int -> Effect
 -- TODO 6789ABDEF
-decodeEffect 0x0 x = Arpeggio (x `div` 16) (x `mod` 16)
-decodeEffect 0x1 x = Slide Up x
-decodeEffect 0x2 x = Slide Down x
-decodeEffect 0x3 x = Slide Approach x
-decodeEffect 0x4 x = Vibrato (x `div` 16) (x `mod` 16)
-decodeEffect 0x5 x = Tremolo (x `div` 16) (x `mod` 16)
-decodeEffect 0xC x = SetVolume x
-decodeEffect e   x = UnknownEffect e x
+decodeEffect 0x0 x                 = Arpeggio (x `div` 16) (x `mod` 16)
+decodeEffect 0x1 x                 = Slide Up x
+decodeEffect 0x2 x                 = Slide Down x
+decodeEffect 0x3 x                 = Slide Approach x
+decodeEffect 0x4 x                 = Vibrato (x `div` 16) (x `mod` 16)
+decodeEffect 0x5 x                 = Tremolo (x `div` 16) (x `mod` 16)
+decodeEffect 0xC x                 = SetVolume x
+decodeEffect 0xF x | x > 0, x < 32 = SetTicksPerRow x
+decodeEffect 0xF x | x >= 32       = SetTempo x
+decodeEffect e x                   = UnknownEffect e x
 
 pInstruction :: Parser Instruction
 pInstruction = do
