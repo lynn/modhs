@@ -43,7 +43,7 @@ noSound = Sound 0 0 0 0
 
 data PlayerState =
     PlayerState
-        { patternIndex :: PatternIndex
+        { songPosition :: SongPosition
         , rowIndex :: RowIndex
         , tick :: Int
         , ticksPerRow :: Int
@@ -58,7 +58,7 @@ tickSeconds PlayerState { tempo } =
 
 initialPlayerState :: Int -> PlayerState
 initialPlayerState numChannels = PlayerState
-    { patternIndex = 0
+    { songPosition = 0
     , rowIndex     = 0
     , tick         = 0
     , ticksPerRow  = initialTicksPerRow
@@ -68,8 +68,9 @@ initialPlayerState numChannels = PlayerState
 
 -- A helper function to fetch an instruction.
 instructionAt
-    :: PatternIndex -> RowIndex -> ChannelIndex -> Module -> Instruction
-instructionAt pi ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
+    :: SongPosition -> RowIndex -> ChannelIndex -> Module -> Instruction
+instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
+    where pi = patternTable m ! sp
 
 -- A helper function to set one of the sound values in the player state.
 setSound :: Playback m => ChannelIndex -> Sound -> m ()
@@ -95,13 +96,13 @@ interpretEffect ci effect = case effect of
 
 interpretRow :: Playback m => m ()
 interpretRow = do
-    PlayerState { patternIndex = pi, rowIndex = ri } <- get
+    PlayerState { songPosition = sp, rowIndex = ri } <- get
     cs    <- asks channelCount
     infos <- asks sampleInfos
     forM_ [0 .. cs - 1] $ \ci -> do
         sounds <- gets sounds
         let Sound s p v t = sounds V.! ci
-        Instruction ins inp effect <- asks (instructionAt pi ri ci)
+        Instruction ins inp effect <- asks (instructionAt sp ri ci)
         let s' = if ins == 0 then s else ins
         let p' = if inp == 0 then p else inp
         let v' = if ins == 0 then v else volume (infos ! ins)
@@ -159,15 +160,15 @@ nextRow :: Playback m => m ()
 nextRow = do
     ri <- gets rowIndex
     let ri' = (ri + 1) `mod` rowsPerPattern
-    when (ri' == 0) nextPattern
+    when (ri' == 0) nextPosition
     modify (\ps -> ps { rowIndex = ri' })
 
-nextPattern :: Playback m => m ()
-nextPattern = do
-    pi <- gets patternIndex
-    pc <- asks songPositionCount
-    let pi' = (pi + 1) `mod` pc
-    modify (\ps -> ps { patternIndex = pi' })
+nextPosition :: Playback m => m ()
+nextPosition = do
+    sp <- gets songPosition
+    spc <- asks songPositionCount
+    let sp' = (sp + 1) `mod` spc
+    modify (\ps -> ps { songPosition = sp' })
 
 --------------------
 -- Main interpret-play-mix-tell action.
