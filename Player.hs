@@ -5,24 +5,24 @@
 
 module Player where
 
-import           Data.ByteString                ( ByteString )
-import qualified Data.ByteString               as B
-import           Types
+import           Constants
 import           Control.Monad
 import           Control.Monad.RWS
 import           Data.Array
+import           Data.ByteString                ( ByteString )
 import           Data.Vector                    ( Vector )
-import qualified Data.Vector                   as V
-import           Constants
-import           Prelude                 hiding ( pi )
 import           Data.Word
 import           Debug.Trace
+import           Prelude                 hiding ( pi )
+import           Types
+import qualified Data.ByteString               as B
+import qualified Data.Vector                   as V
 
 instructionAt
     :: PatternIndex -> RowIndex -> ChannelIndex -> Module -> Instruction
 instructionAt pi ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
 
-type Playback m = MonadRWS Module ByteString PlayerState m
+type Playback m = MonadRWS Module [ByteString] PlayerState m
 
 data Sound =
     Sound
@@ -109,11 +109,11 @@ playSample seconds ci = do
     sounds      <- gets sounds
     sampleInfos <- asks sampleInfos
     sampleWaves <- asks sampleWaves
-    let n             = round (seconds * outputBitRate)
-    let Sound s p v w = sounds V.! ci
-    case s of
-        0 -> pure (V.replicate n 0)
-        _ -> do
+    let n = round (seconds * outputBitRate)
+    case sounds V.! ci of
+        Sound 0 _ _ _ -> pure (V.replicate n 0)
+        Sound _ 0 _ _ -> pure (V.replicate n 0)
+        Sound s p v w -> do
             let wave = sampleWaves ! s
             let info = sampleInfos ! s
             let ro   = repeatOffset info
@@ -140,25 +140,21 @@ toSigned16 i
 
 playTick :: Playback m => m ()
 playTick = do
-    -- traceM . show . V.map soundWord =<< gets sounds
     t <- gets tick
     when (t == 0) interpretRow
     seconds <- gets tickSeconds
     cs      <- asks channelCount
     audios  <- mapM (playSample seconds) [0 .. cs - 1]
-    let mixed = map (`div` 1000) $ V.toList $ foldl1 (V.zipWith (+)) audios
-    -- traceM (show (take 200 mixed))
-    let bytes = B.pack (concatMap toSigned16 mixed)
-    tell bytes
-    -- tell $ B.pack $ concatMap toSigned16 $ V.toList . V.concat $ audios
+    let mixed = fmap (`div` 4) $ foldl1 (V.zipWith (+)) audios
+    let bytes = B.pack (concatMap (reverse . toSigned16) mixed)
+    tell [bytes]
     nextTick
 
 
-playModule :: Module -> IO ()
-playModule m = do
-    let initialState      = initialPlayerState (channelCount m)
-    let (finalState, pcm) = execRWS (replicateM 1000 playTick) m initialState
-    print finalState
+playModule :: Module -> Int -> IO ()
+playModule m ticks = do
+    let initialState       = initialPlayerState (channelCount m)
+    let (finalState, pcms) = execRWS (replicateM ticks playTick) m initialState
+    let pcm                = pcms `seq` B.concat pcms
     -- let pcm = B.pack . concatMap toSigned16 . V.toList . (!1) . sampleWaves $ m
     B.writeFile "output.pcm" pcm
-    print (B.length pcm)

@@ -16,11 +16,11 @@ main :: IO ()
 main = do
     args <- getArgs
     case args of
-        [path] -> do
+        [path, tickCount] -> do
             P.Done _ m <- P.parse pModule <$> B.readFile path
-            playModule m
+            playModule m (read tickCount)
             -- defaultMain [bench path $ nfIO (P.parse pModule <$> B.readFile path)]
         _ -> do
             progName <- getProgName
-            hPutStrLn stderr ("usage: " ++ progName ++ " input.mod")
+            hPutStrLn stderr ("usage: " ++ progName ++ " input.mod <ticks>")
             exitFailure
