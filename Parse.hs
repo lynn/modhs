@@ -37,13 +37,16 @@ pArray start count p =
     listArray (start, start + fromIntegral count - 1) <$> P.count count p
 
 decodeEffect :: Int -> Int -> Effect
--- TODO 6789AEF
+-- TODO 9EF
 decodeEffect 0x0 x                 = Arpeggio (x `div` 16) (x `mod` 16)
 decodeEffect 0x1 x                 = Slide Up x
 decodeEffect 0x2 x                 = Slide Down x
 decodeEffect 0x3 x                 = Slide Approach x
 decodeEffect 0x4 x                 = Vibrato (x `div` 16) (x `mod` 16)
-decodeEffect 0x5 x                 = Tremolo (x `div` 16) (x `mod` 16)
+decodeEffect 0x5 x                 = VolumeSlide (volumeSlideDelta x) (Just ContinueSlide)
+decodeEffect 0x6 x                 = VolumeSlide (volumeSlideDelta x) (Just ContinueVibrato)
+decodeEffect 0x7 x                 = Tremolo (x `div` 16) (x `mod` 16)
+decodeEffect 0xA x                 = VolumeSlide (volumeSlideDelta x) Nothing
 decodeEffect 0xB x                 = PositionJump x
 decodeEffect 0xC x                 = SetVolume x
 decodeEffect 0xD x                 = PatternBreak x
