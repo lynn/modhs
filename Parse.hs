@@ -18,9 +18,7 @@ import           Types
 import           Data.Bits
 
 pSignature :: Parser ()
-pSignature = void
-    (P.string "M.K." <|> P.string "4CHN" <|> P.string "M!K!" <|> P.string "FLT4"
-    )
+pSignature = void $ P.choice $ map P.string ["M.K.", "4CHN", "M!K!", "FLT4"]
 
 pSampleInfo :: Parser SampleInfo
 pSampleInfo = do
@@ -53,6 +51,9 @@ decodeEffect 0xD x                 = PatternBreak x
 decodeEffect 0xF x | x > 0, x < 32 = SetTicksPerRow x
 decodeEffect 0xF x | x >= 32       = SetTempo x
 decodeEffect e x                   = UnknownEffect e x
+
+volumeSlideDelta :: Int -> Int
+volumeSlideDelta x = if x >= 0x10 then x `div` 0x10 else -x
 
 pInstruction :: Parser Instruction
 pInstruction = do

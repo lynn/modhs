@@ -33,7 +33,7 @@ data SlideDirection = Up | Down | Approach
     deriving (Eq, Ord, Show, Generic, NFData)
 
 data ContinuedEffect
-    = ContinuePitch
+    = ContinueSlide
     | ContinueVibrato
     deriving (Eq, Ord, Show, Generic, NFData)
 

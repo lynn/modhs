@@ -34,12 +34,14 @@ data Sound =
         , soundPeriod :: Int
         , soundVolume :: Int
         , soundTime   :: Int -- How far into the sample waveform are we?
+        , soundArp1   :: Int -- How many steps up to play on tick 1 mod 3?
+        , soundArp2   :: Int -- How many steps up to play on tick 2 mod 3?
         }
     deriving (Eq, Ord, Show)
 
 -- Silence.
 noSound :: Sound
-noSound = Sound 0 0 0 0
+noSound = Sound 0 0 0 0 0 0
 
 data Jump = Jump SongPosition RowIndex
     deriving (Eq, Ord, Show)
@@ -113,7 +115,8 @@ schedulePositionJump sp = do
 -- Schedule a pattern break (Dxx) to be executed on the next row.
 schedulePatternBreak :: Playback m => Int -> m ()
 schedulePatternBreak ri = do
-    sp <- nextSongPosition
+    spc <- asks songPositionCount
+    sp  <- nextSongPosition
     let sp' = (sp + 1) `mod` spc
     when (ri < rowsPerPattern) $ scheduleJump (Jump sp' ri)
 
@@ -124,6 +127,7 @@ schedulePatternBreak ri = do
 interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
 interpretEffect ci effect = case effect of
     NoEffect          -> pure ()
+    Arpeggio x y -> modifySound ci (\s -> s { soundArp1 = x, soundArp2 = y })
     PositionJump   sp -> schedulePositionJump sp
     SetVolume      v  -> modifySound ci (\s -> s { soundVolume = v })
     PatternBreak   ri -> schedulePatternBreak ri
@@ -139,13 +143,13 @@ interpretRow = do
     infos <- asks sampleInfos
     forM_ [0 .. cs - 1] $ \ci -> do
         sounds <- gets sounds
-        let Sound s p v t = sounds V.! ci
+        let Sound s p v t _ _ = sounds V.! ci
         Instruction ins inp effect <- asks (instructionAt sp ri ci)
         let s' = if ins == 0 then s else ins
         let p' = if inp == 0 then p else inp
         let v' = if ins == 0 then v else volume (infos ! ins)
         let t' = if inp == 0 then t else 0
-        setSound ci (Sound s' p' v' t')
+        setSound ci (Sound s' p' v' t' 0 0)
         interpretEffect ci effect
 
 -- Return a function for indexing into sample s's waveform in a properly looping/cutting fashion.
@@ -163,9 +167,16 @@ waveFunction s = do
 palSampleRate :: Int -> Double
 palSampleRate period = palClockRate / (4.0 * fromIntegral period) -- TODO: why the 4? should be 2
 
+arpeggioFactor :: Playback m => ChannelIndex -> m Double
+arpeggioFactor ci = do
+    t <- gets tick
+    Sound _ _ _ _ arp1 arp2 <- gets ((V.! ci) . sounds)
+    let semitones = [0, arp1, arp2] !! (t `mod` 3)
+    pure $ 2 ** (fromIntegral semitones / 12)
+
 playChannel :: Playback m => Double -> ChannelIndex -> m (Vector Int)
 playChannel seconds ci = do
-    Sound sampleIndex period volume t0 <- gets ((V.! ci) . sounds)
+    Sound sampleIndex period volume t0 _ _ <- gets ((V.! ci) . sounds)
     let n = round (seconds * outputSampleRate)
     if sampleIndex == 0 || period == 0
         then pure (V.replicate n 0)
@@ -175,7 +186,8 @@ playChannel seconds ci = do
             -- at k=8000/44100 increments rounded to the nearest integer: [0,0,0,1,1,1,1,1,1,2,2,2,2,2,3,3...]
             wave <- waveFunction sampleIndex
             ff   <- asks (finetuneFactor . (! sampleIndex) . sampleInfos)
-            let freq = palSampleRate period * ff
+            af   <- arpeggioFactor ci
+            let freq = palSampleRate period * ff * af
             let t i = t0 + round (freq / outputSampleRate * fromIntegral i)
             let resampled = V.generate n ((* volume) . wave . t)
 
