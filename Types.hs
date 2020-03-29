@@ -29,8 +29,10 @@ data SampleInfo =
         }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-data SlideDirection = Up | Down | Approach
-    deriving (Eq, Ord, Show, Generic, NFData)
+type SampleWave = Vector Int
+
+type SampleInfos = Array SampleIndex SampleInfo
+type SampleWaves = Array SampleIndex SampleWave
 
 data ContinuedEffect
     = ContinueSlide
@@ -66,7 +68,8 @@ data WaveformOptions
 data Effect
     = NoEffect
     | Arpeggio { second :: SemitoneDelta, third :: SemitoneDelta }
-    | Slide { direction :: SlideDirection, delta :: PeriodDelta }
+    | Slide { delta :: PeriodDelta }
+    | Portamento { speed :: PeriodDelta }
     | Vibrato { speed :: Int, amplitude :: Int }
     | Tremolo { speed :: Int, amplitude :: Int }
     | Offset { pages :: PageCount }
@@ -103,17 +106,15 @@ newtype Pattern =
     Pattern { rows :: Array RowIndex Row }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-type SampleWave = Vector Int
-
 data Module =
     Module
         { title             :: ByteString
-        , sampleInfos       :: Array SampleIndex SampleInfo
+        , sampleInfos       :: SampleInfos
         , songPositionCount :: Int
         , restartPosition   :: SongPosition
         , patternTable      :: Array SongPosition PatternIndex
         , patterns          :: Array PatternIndex Pattern
-        , sampleWaves       :: Array SampleIndex SampleWave
+        , sampleWaves       :: SampleWaves
         , channelCount      :: Int
         }
     deriving (Eq, Ord, Show, Generic, NFData)

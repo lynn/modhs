@@ -9,6 +9,7 @@ import           Control.Monad
 import           Control.Monad.RWS
 import           Data.Array
 import           Data.Bits
+import           Data.List (mapAccumL)
 import           Data.ByteString                ( ByteString )
 import           Data.Vector                    ( Vector )
 import           Debug.Trace
@@ -20,231 +21,142 @@ import           Constants
 import           Types
 import           Render
 
+clamp :: Ord a => a -> a -> a -> a
+clamp lo hi x = max lo (min hi x)
+
 --------------------
 -- Definitions
 --------------------
 
--- The .MOD playback monad context.
-type Playback m = MonadRWS Module [ByteString] PlayerState m
+data SoundData =
+    SoundData
+        { soundInfos :: SampleInfos
+        , soundWaves :: Array SampleIndex SampleWave
+        }
+    deriving (Show)
 
 -- A sound being played on a channel.
 data Sound =
     Sound
-        { soundSample :: SampleIndex
+        { soundIndex  :: SampleIndex
         , soundPeriod :: Int
         , soundVolume :: Int
-        , soundTime   :: Int -- How far into the sample waveform are we?
-        , soundArp1   :: Int -- How many steps up to play on tick 1 mod 3?
-        , soundArp2   :: Int -- How many steps up to play on tick 2 mod 3?
+        , soundTime   :: Int
         }
     deriving (Eq, Ord, Show)
 
 -- Silence.
 noSound :: Sound
-noSound = Sound 0 0 0 0 0 0
+noSound = Sound 0 0 0 0
 
-data Jump = Jump SongPosition RowIndex
-    deriving (Eq, Ord, Show)
+-- Interpret all jumps in the song and return an infinite list of rows in playback order.
+interpretJumps :: Module -> [Row]
+interpretJumps Module { songPositionCount, restartPosition, patternTable, patterns } =
+    go 0 0 0 0 0
+    where
+        go sp r spL rL loop =
+            let
+                row = rows (patterns ! (patternTable ! sp)) ! r
+                effects = map effect (elems $ instructions row)
+                maxSp = songPositionCount - 1
+                nextSp = if sp == maxSp then restartPosition else sp + 1
 
-data PlayerState =
-    PlayerState
-        { songPosition  :: SongPosition
-        , rowIndex      :: RowIndex
-        , tick          :: Int
-        , ticksPerRow   :: Int
-        , tempo         :: Int
-        , sounds        :: Vector Sound
-        , scheduledJump :: Maybe Jump
+                -- By default, the position advances like this:
+                dr' = (r + 1) `mod` rowsPerPattern
+                dsp' = if dr' == 0 then nextSp else sp
+
+                -- But effects can overwrite this:
+                applyJumpEffect (PositionJump k) (_,  _, spL, rL, loop) = (k', 0, spL, rL, loop) where k' = clamp 0 maxSp k
+                applyJumpEffect (PatternBreak k) (_,  _, spL, rL, loop) = (nextSp, k, spL, rL, loop)
+                applyJumpEffect LoopStart        (sp', r', spL, rL, loop) = (sp', r', sp, r, 0)
+                applyJumpEffect (LoopEnd k)      (sp', r', spL, rL, loop) | loop >= k = (sp', r', spL, rL, 0)
+                                                                            | otherwise = (spL, rL, spL, rL, loop + 1)
+                applyJumpEffect _ position = position
+                (sp', r', spL', rL', loop') = foldr applyJumpEffect (dsp', dr', spL, rL, loop) effects
+            in
+                row : go sp' r' spL' rL' loop'
+
+data TimedRow =
+    TimedRow
+        { ticks :: Int
+        , tickDuration :: Double
+        , innerRow :: Row
         }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Show)
 
-tickSeconds :: PlayerState -> Double
-tickSeconds PlayerState { tempo } =
-    0.02 * fromIntegral initialTempo / fromIntegral tempo
+tempoToDuration :: Int -> Double
+tempoToDuration t = 0.02 * fromIntegral initialTempo / fromIntegral t
+
+interpretTiming :: [Row] -> [TimedRow]
+interpretTiming rows =
+    zipWith makeTimedRow timings rows
+    where
+        makeTimedRow (t, td) row = TimedRow t td row
+        initialTickDuration = tempoToDuration initialTempo
+        initialTiming = (initialTicksPerRow, initialTickDuration)
+        timings = tail $ scanl setTiming initialTiming rows
+        setTiming timing row = foldr applyTimingEffect timing $ map effect $ elems $ instructions row
+        applyTimingEffect (SetTicksPerRow k) (_, td) = (k, td)
+        applyTimingEffect (SetTempo k) (t, _) = (t, tempoToDuration k)
+        applyTimingEffect _ timing = timing
+
+expandInstruction :: SampleInfos -> Int -> Instruction -> [Sound -> Sound]
+expandInstruction infos ticks (Instruction ins inp e) =
+    first : rest
+    where
+        loadSample (Sound s p v t) = Sound ins p v' t where v' = volume (infos!ins)
+        playNote (Sound s p v t) = Sound s inp v 0
+        first = (if ins == 0 then id else loadSample) . (if inp == 0 then id else playNote)
+        rest = replicate (ticks - 1) id
+
+palSampleRate :: Int -> Double
+palSampleRate period = palClockRate / (4.0 * fromIntegral period) -- TODO: why the 4? should be 2
 
 finetuneFactor :: SampleInfo -> Double
 finetuneFactor SampleInfo { finetune } =
     let semitones = fromIntegral finetune / 8 in 2 ** (semitones / 12)
 
-initialPlayerState :: Int -> PlayerState
-initialPlayerState numChannels = PlayerState
-    { songPosition  = 0
-    , rowIndex      = 0
-    , tick          = 0
-    , ticksPerRow   = initialTicksPerRow
-    , tempo         = initialTempo
-    , sounds        = V.replicate numChannels noSound
-    , scheduledJump = Nothing
-    }
+playSound :: SampleInfos -> SampleWaves -> Double -> Sound -> (Sound, Vector Int)
+playSound infos waves seconds (Sound s p v t0) =
+    let
+        n = round (seconds * outputSampleRate)
+    in
+        if s == 0 || p == 0 then
+            (Sound s p v t0, V.replicate n 0)
+        else
+            let
+                wave = waves ! s
+                ff = finetuneFactor (infos ! s)
+                ro = repeatOffset (infos ! s)
+                rl = repeatLength (infos ! s)
+                w i | rl > 2 && i < ro  = wave V.! i
+                    | rl > 2            = wave V.! (ro + (i - ro) `mod` rl)
+                    | i < V.length wave = wave V.! i
+                    | otherwise         = 0
+                freq = palSampleRate p * ff
+                t i = t0 + round (freq / outputSampleRate * fromIntegral i)
+                resampled = V.generate n ((* v) . w . t)
+            in
+                (Sound s p v (t n), resampled)
 
--- A helper function to fetch an instruction.
-instructionAt
-    :: SongPosition -> RowIndex -> ChannelIndex -> Module -> Instruction
-instructionAt sp ri ci m = instructions (rows (patterns m ! pi) ! ri) ! ci
-    where pi = patternTable m ! sp
+playTimedRow :: SampleInfos -> SampleWaves -> [Sound] -> TimedRow -> ([Sound], ByteString)
+playTimedRow infos waves sounds (TimedRow ticks tickDuration row) =
+    (sounds', mixAndRender vs)
+    where
+        expandedChannels = map (expandInstruction infos ticks) (elems $ instructions row)
+        playChannel sound fs = V.concat <$> mapAccumL (\s f -> playSound infos waves tickDuration (f s)) sound fs
+        (sounds', vs) = unzip $ zipWith playChannel sounds expandedChannels
 
--- A helper function to set one of the sound values in the player state.
-setSound :: Playback m => ChannelIndex -> Sound -> m ()
-setSound ci sound = modifySound ci (const sound)
-
--- A helper function to modify one of the sound values in the player state.
-modifySound :: Playback m => ChannelIndex -> (Sound -> Sound) -> m ()
-modifySound ci f =
-    modify (\ps -> ps { sounds = sounds ps V.// [(ci, f $ sounds ps V.! ci)] })
-
---------------------
--- Jumps
---------------------
-
-executeScheduledJump :: Playback m => m ()
-executeScheduledJump = do
-    sj <- gets scheduledJump
-    forM_ sj $ \(Jump sp ri) ->
-        modify (\ps -> ps { songPosition = sp, rowIndex = ri })
-    modify (\ps -> ps { scheduledJump = Nothing })
-
-scheduleJump :: Playback m => Jump -> m ()
-scheduleJump jump = modify (\ps -> ps { scheduledJump = Just jump })
-
--- Schedule a position jump (Bxx) to be executed on the next row.
-schedulePositionJump :: Playback m => Int -> m ()
-schedulePositionJump sp = do
-    spc <- asks songPositionCount
-    when (sp < spc) $ scheduleJump (Jump sp 0)
-
--- Schedule a pattern break (Dxx) to be executed on the next row.
-schedulePatternBreak :: Playback m => Int -> m ()
-schedulePatternBreak ri = do
-    spc <- asks songPositionCount
-    sp  <- nextSongPosition
-    let sp' = (sp + 1) `mod` spc
-    when (ri < rowsPerPattern) $ scheduleJump (Jump sp' ri)
-
---------------------
--- Interpret module data.
---------------------
-
-interpretEffect :: Playback m => ChannelIndex -> Effect -> m ()
-interpretEffect ci effect = case effect of
-    NoEffect          -> pure ()
-    Arpeggio x y -> modifySound ci (\s -> s { soundArp1 = x, soundArp2 = y })
-    PositionJump   sp -> schedulePositionJump sp
-    SetVolume      v  -> modifySound ci (\s -> s { soundVolume = v })
-    PatternBreak   ri -> schedulePatternBreak ri
-    SetTempo       t  -> modify (\ps -> ps { tempo = t })
-    SetTicksPerRow t  -> modify (\ps -> ps { ticksPerRow = t })
-    _                 -> pure ()
-
-interpretRow :: Playback m => m ()
-interpretRow = do
-    executeScheduledJump
-    PlayerState { songPosition = sp, rowIndex = ri } <- get
-    cs    <- asks channelCount
-    infos <- asks sampleInfos
-    forM_ [0 .. cs - 1] $ \ci -> do
-        sounds <- gets sounds
-        let Sound s p v t _ _ = sounds V.! ci
-        Instruction ins inp effect <- asks (instructionAt sp ri ci)
-        let s' = if ins == 0 then s else ins
-        let p' = if inp == 0 then p else inp
-        let v' = if ins == 0 then v else volume (infos ! ins)
-        let t' = if inp == 0 then t else 0
-        setSound ci (Sound s' p' v' t' 0 0)
-        interpretEffect ci effect
-
--- Return a function for indexing into sample s's waveform in a properly looping/cutting fashion.
-waveFunction :: Playback m => SampleIndex -> m (Int -> Int)
-waveFunction s = do
-    wave <- asks ((! s) . sampleWaves)
-    info <- asks ((! s) . sampleInfos)
-    let (ro, rl) = (repeatOffset info, repeatLength info)
-    let f i | rl > 2 && i < ro  = wave V.! i
-            | rl > 2            = wave V.! (ro + (i - ro) `mod` rl)
-            | i < V.length wave = wave V.! i
-            | otherwise         = 0
-    pure f
-
-palSampleRate :: Int -> Double
-palSampleRate period = palClockRate / (4.0 * fromIntegral period) -- TODO: why the 4? should be 2
-
-arpeggioFactor :: Playback m => ChannelIndex -> m Double
-arpeggioFactor ci = do
-    t <- gets tick
-    Sound _ _ _ _ arp1 arp2 <- gets ((V.! ci) . sounds)
-    let semitones = [0, arp1, arp2] !! (t `mod` 3)
-    pure $ 2 ** (fromIntegral semitones / 12)
-
-playChannel :: Playback m => Double -> ChannelIndex -> m (Vector Int)
-playChannel seconds ci = do
-    Sound sampleIndex period volume t0 _ _ <- gets ((V.! ci) . sounds)
-    let n = round (seconds * outputSampleRate)
-    if sampleIndex == 0 || period == 0
-        then pure (V.replicate n 0)
-        else do
-            -- Resampling. Suppose we are outputting 44100 Hz audio, and this sample must be played back at 8000Hz.
-            -- Then we should "stretch out" the sample by a factor 44100/8000, which means we index its waveform
-            -- at k=8000/44100 increments rounded to the nearest integer: [0,0,0,1,1,1,1,1,1,2,2,2,2,2,3,3...]
-            wave <- waveFunction sampleIndex
-            ff   <- asks (finetuneFactor . (! sampleIndex) . sampleInfos)
-            af   <- arpeggioFactor ci
-            let freq = palSampleRate period * ff * af
-            let t i = t0 + round (freq / outputSampleRate * fromIntegral i)
-            let resampled = V.generate n ((* volume) . wave . t)
-
-            -- Advance this sound's time value.
-            modifySound ci (\s -> s { soundTime = t n })
-            pure resampled
-
---------------------
--- Advance player state.
---------------------
-
-advanceTick :: Playback m => m ()
-advanceTick = do
-    t   <- gets tick
-    tpr <- gets ticksPerRow
-    let t' = (t + 1) `mod` tpr
-    when (t' == 0) advanceRow
-    modify (\ps -> ps { tick = t' })
-
-advanceRow :: Playback m => m ()
-advanceRow = do
-    ri <- gets rowIndex
-    let ri' = (ri + 1) `mod` rowsPerPattern
-    when (ri' == 0) advancePosition
-    modify (\ps -> ps { rowIndex = ri' })
-
-nextSongPosition :: Playback m => m SongPosition
-nextSongPosition = do
-    sp  <- gets songPosition
-    spc <- asks songPositionCount
-    pure $ (sp + 1) `mod` spc
-
-advancePosition :: Playback m => m ()
-advancePosition = do
-    sp' <- nextSongPosition
-    modify (\ps -> ps { songPosition = sp' })
-
---------------------
--- Main interpret-play-mix-tell action.
---------------------
-
-playTick :: Playback m => m ()
-playTick = do
-    t       <- gets tick
-    seconds <- gets tickSeconds
-    cs      <- asks channelCount
-    when (t == 0) interpretRow
-    channelAudios <- mapM (playChannel seconds) [0 .. cs - 1]
-    tell [mixAndRender channelAudios]
-    advanceTick
-
--- IO monad interface to playing a module.
+playTimedRows :: SampleInfos -> SampleWaves -> [Sound] -> [TimedRow] -> [ByteString]
+playTimedRows infos waves sounds [] = []
+playTimedRows infos waves sounds (row:rows) =
+    bs : playTimedRows infos waves sounds' rows
+    where (sounds', bs) = playTimedRow infos waves sounds row
 
 playModule :: Module -> Int -> IO ()
-playModule m ticks = do
-    let initialState       = initialPlayerState (channelCount m)
-    let (finalState, pcms) = execRWS (replicateM ticks playTick) m initialState
-    let pcm                = pcms `seq` B.concat pcms
-    print finalState
+playModule m@Module { sampleInfos, sampleWaves, channelCount } rowCount = do
+    let rowOrder = interpretJumps m
+    let timedRows = take rowCount $ interpretTiming rowOrder
+    let initialSounds = replicate channelCount noSound
+    let pcm = B.concat $ playTimedRows sampleInfos sampleWaves initialSounds timedRows
     B.writeFile "output.pcm" pcm
