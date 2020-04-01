@@ -7,6 +7,8 @@ import           Data.Word
 import qualified Data.ByteString               as B
 import qualified Data.Vector                   as V
 
+import Types
+
 outputSampleRate :: Double
 outputSampleRate = 44100.0 -- Hz
 
@@ -34,5 +36,5 @@ mix channelAudios =
 toPCM :: [(Int, Int)] -> ByteString
 toPCM = B.pack . concatMap toSigned16LE . concatMap (\(l, r) -> [l, r])
 
-mixAndRender :: [Vector Int] -> ByteString
+mixAndRender :: [Waveform] -> ByteString
 mixAndRender = toPCM . mix

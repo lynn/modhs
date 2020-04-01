@@ -1,0 +1,28 @@
+multiple "passes":
+
+interpretLoops :: Module -> Stream Row
+-- eliminates Bxx, Dxx, E6x, EEx
+
+interpretTiming :: Stream Row -> Stream TimedRow
+-- eliminates Fxx
+
+TimedRow = (TicksPerRow, Tempo, Row)
+
+expand :: TicksPerRow -> Instruction -> [Sound -> Sound]
+
+playSound :: Double -> State Sound ByteString
+playSound secs = do
+  -- advance and render...
+  pure resampled
+
+play :: TimedRow -> State [Sound] ByteString
+play (tpr, tempo, insts) =
+  let es = map (expand tpr) insts   :: [[Sound -> Sound]]
+  -- es = [[a1, a2, a3], [b1, b2, b3], [c1, c2, c3], [d1, d2, d3]]
+  -- states = [State, State, State, State]
+  let d = dur
+  bs <- forM (transpose es) $ \ii ->
+    sounds <- get
+    (bs, sds) <- unzip $ map (runState (playSound d)) sounds -- :: ([a], [s])
+    put sds
+    mixAndRender bs

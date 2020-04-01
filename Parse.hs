@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{- HLINT ignore "Use <$>" -}
 
 module Parse where
 
@@ -16,19 +15,25 @@ import           Control.Applicative
 import           Control.Monad
 import           Types
 import           Data.Bits
+import           Lens.Micro
 
 pSignature :: Parser ()
 pSignature = void $ P.choice $ map P.string ["M.K.", "4CHN", "M!K!", "FLT4"]
 
 pSampleInfo :: Parser SampleInfo
 pSampleInfo = do
-    name         <- P.take 22
-    length       <- P.u16
-    finetune     <- P.u8
-    volume       <- P.u8
-    repeatOffset <- P.u16
-    repeatLength <- P.u16
-    pure $ SampleInfo name length finetune volume repeatOffset repeatLength
+    sName         <- P.take 22
+    sLength       <- P.u16
+    sFinetune     <- P.u8
+    sVolume       <- P.u8
+    sRepeatOffset <- P.u16
+    sRepeatLength <- P.u16
+    pure $ SampleInfo sName
+                      sLength
+                      sFinetune
+                      sVolume
+                      sRepeatOffset
+                      sRepeatLength
 
 pArray :: (Ix i, Num i) => i -> Int -> Parser a -> Parser (Array i a)
 pArray start count p =
@@ -41,8 +46,8 @@ decodeEffect 0x1 x                 = Slide x
 decodeEffect 0x2 x                 = Slide (-x)
 decodeEffect 0x3 x                 = Portamento x
 decodeEffect 0x4 x                 = Vibrato (x `div` 16) (x `mod` 16)
-decodeEffect 0x5 x                 = VolumeSlide (volumeSlideDelta x) (Just ContinueSlide)
-decodeEffect 0x6 x                 = VolumeSlide (volumeSlideDelta x) (Just ContinueVibrato)
+decodeEffect 0x5 x = VolumeSlide (volumeSlideDelta x) (Just ContinueSlide)
+decodeEffect 0x6 x = VolumeSlide (volumeSlideDelta x) (Just ContinueVibrato)
 decodeEffect 0x7 x                 = Tremolo (x `div` 16) (x `mod` 16)
 decodeEffect 0xA x                 = VolumeSlide (volumeSlideDelta x) Nothing
 decodeEffect 0xB x                 = PositionJump x
@@ -78,10 +83,10 @@ pInstruction = do
     pure $ Instruction sample period effect
 
 pRow :: Parser Row
-pRow = Row <$> pArray 0 4 pInstruction
+pRow = pArray 0 4 pInstruction
 
 pPattern :: Parser Pattern
-pPattern = Pattern <$> pArray 0 64 pRow
+pPattern = pArray 0 64 pRow
 
 pModule :: Parser Module
 pModule = do
@@ -93,7 +98,7 @@ pModule = do
     pSignature
     let patternCount = maximum patternTable + 1
     patterns <- pArray 0 patternCount pPattern
-    samples  <- forM sampleInfos $ \si -> V.replicateM (length si) P.i16
+    samples  <- forM sampleInfos $ \si -> V.replicateM (si ^. length) P.i16
     let channelCount = 4
     pure $ Module title
                   sampleInfos

@@ -1,4 +1,9 @@
-{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 module Types where
 import           Data.Array                     ( Array )
@@ -6,33 +11,44 @@ import           Data.Vector                    ( Vector )
 import           Data.ByteString                ( ByteString )
 import           GHC.Generics                   ( Generic )
 import           Control.DeepSeq
+import           Lens.Micro.TH
 
-type WordCount     = Int
-type PageCount     = Int
-type SongPosition  = Int
-type PatternIndex  = Int
-type SampleIndex   = Int
-type SemitoneDelta = Int
-type ChannelIndex  = Int
-type RowIndex      = Int
-type Period        = Int
-type PeriodDelta   = Int
+type ChannelIndex = Int
+type PageCount = Int
+type PatternIndex = Int
+type Period = Int
+type PeriodDelta = Int
+type RowCount = Int
+type RowIndex = Int
+type SampleIndex = Int
+type Semitone16ths = Int -- Unit of vibrato amplitude.
+type Semitone8thDelta = Int -- Unit of finetune.
+type SemitoneDelta = Int -- Unit of arpeggio.
+type SongPosition = Int
+type TempoValue = Int
+type TickCount = Int
+type Volume = Int
+type VolumeDelta = Int -- Unit of tremolo amplitude and volume slides.
+type WaveEffectSpeed = Int -- Advance phase by this many 16ths of a period per row.
+type WordCount = Int
 
 data SampleInfo =
     SampleInfo
-        { name         :: ByteString
-        , length       :: WordCount
-        , finetune     :: Int
-        , volume       :: Int
-        , repeatOffset :: WordCount
-        , repeatLength :: WordCount
+        { _sampleInfoName          :: ByteString
+        , _sampleInfoLength        :: WordCount
+        , _sampleInfoFinetune      :: Semitone8thDelta
+        , _sampleInfoDefaultVolume :: Volume
+        , _sampleInfoRepeatOffset  :: WordCount
+        , _sampleInfoRepeatLength  :: WordCount
         }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-type SampleWave = Vector Int
+makeFields ''SampleInfo
+
+type Waveform = Vector Int
 
 type SampleInfos = Array SampleIndex SampleInfo
-type SampleWaves = Array SampleIndex SampleWave
+type SampleWaves = Array SampleIndex Waveform
 
 data ContinuedEffect
     = ContinueSlide
@@ -49,7 +65,7 @@ data GlissandoMode
     | Smooth
     deriving (Eq, Ord, Show, Generic, NFData)
 
-data Waveform
+data WaveformShape
     = SineWave
     | RampDown
     | SquareWave
@@ -62,49 +78,50 @@ data WaveformBehavior
     deriving (Eq, Ord, Show, Generic, NFData)
 
 data WaveformOptions
-    = WaveformOptions { waveform :: Waveform, behavior :: WaveformBehavior }
+    = WaveformOptions WaveformShape WaveformBehavior
     deriving (Eq, Ord, Show, Generic, NFData)
 
 data Effect
     = NoEffect
-    | Arpeggio { second :: SemitoneDelta, third :: SemitoneDelta }
-    | Slide { delta :: PeriodDelta }
-    | Portamento { speed :: PeriodDelta }
-    | Vibrato { speed :: Int, amplitude :: Int }
-    | Tremolo { speed :: Int, amplitude :: Int }
-    | Offset { pages :: PageCount }
-    | VolumeSlide { volumeDelta :: Int, continuedEffect :: Maybe ContinuedEffect }
-    | PositionJump { position :: SongPosition }
-    | SetVolume { newVolume :: Int }
-    | PatternBreak { newRowIndex :: Int }
-    | FilterControl { state :: FilterState }
-    | GlissandoControl { mode :: GlissandoMode }
-    | SetVibratoWaveform { options :: WaveformOptions }
-    | SetTremoloWaveform { options :: WaveformOptions }
-    | SetFinetune { newFinetune :: Int }
-    | LoopStart
-    | LoopEnd { times :: Int }
-    | RetriggerSample { ticks :: Int }
-    | FineVolumeSlide { volumeDelta :: Int }
-    | CutSample { ticks :: Int }
-    | DelaySample { ticks :: Int }
-    | DelayPattern { delayRows :: Int }
-    | SetTicksPerRow { newTicksPerRow :: Int }
-    | SetTempo { newTempo :: Int }
+    | {- 0xx     -} Arpeggio SemitoneDelta SemitoneDelta
+    | {- 1xx 2xx -} Slide PeriodDelta
+    | {- 3xx     -} Portamento PeriodDelta
+    | {- 4xx     -} Vibrato WaveEffectSpeed Semitone16ths
+    | {- 7xx     -} Tremolo WaveEffectSpeed VolumeDelta
+    | {- 9xx     -} Offset PageCount
+    | {- 5,6,Axx -} VolumeSlide VolumeDelta (Maybe ContinuedEffect)
+    | {- Bxx     -} PositionJump SongPosition
+    | {- Cxx     -} SetVolume Volume
+    | {- Dxx     -} PatternBreak RowIndex
+    | {- E0x     -} FilterControl FilterState
+    | {- E3x     -} GlissandoControl GlissandoMode
+    | {- E4x     -} SetVibratoWaveform WaveformOptions
+    | {- E7x     -} SetTremoloWaveform WaveformOptions
+    | {- E5x     -} SetFinetune Semitone8thDelta
+    | {- E60     -} LoopStart
+    | {- E6x     -} LoopEnd Int
+    | {- E9x     -} RetriggerSample TickCount
+    | {- EAx EBx -} FineVolumeSlide VolumeDelta
+    | {- ECx     -} CutSample TickCount
+    | {- EDx     -} DelaySample TickCount
+    | {- EEx     -} DelayPattern RowCount
+    | {- Fxx <32 -} SetTicksPerRow TickCount
+    | {- Fxx ≥32 -} SetTempo TempoValue
     | UnknownEffect { effectNumber :: Int, argument :: Int }
     deriving (Eq, Ord, Show, Generic, NFData)
 
 data Instruction =
-    Instruction { sample :: SampleIndex, period :: Period, effect :: Effect }
+    Instruction
+        { _instructionSample :: SampleIndex
+        , _instructionPeriod :: Period
+        , _instructionEffect :: Effect
+        }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-newtype Row =
-    Row { instructions :: Array ChannelIndex Instruction }
-    deriving (Eq, Ord, Show, Generic, NFData)
+makeFields ''Instruction
 
-newtype Pattern =
-    Pattern { rows :: Array RowIndex Row }
-    deriving (Eq, Ord, Show, Generic, NFData)
+type Row = Array ChannelIndex Instruction
+type Pattern = Array RowIndex Row
 
 data Module =
     Module
