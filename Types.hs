@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -14,13 +15,17 @@ import           Control.DeepSeq
 import           Lens.Micro.TH
 
 type ChannelIndex = Int
+type FractionalSemitones = Double
+type IndexIntoWaveform = Int
 type PageCount = Int
 type PatternIndex = Int
 type Period = Int
 type PeriodDelta = Int
+type Radians = Double
 type RowCount = Int
 type RowIndex = Int
-type SampleIndex = Int
+type InstrumentIndex = Int
+type Seconds = Double
 type Semitone16ths = Int -- Unit of vibrato amplitude.
 type Semitone8thDelta = Int -- Unit of finetune.
 type SemitoneDelta = Int -- Unit of arpeggio.
@@ -32,23 +37,23 @@ type VolumeDelta = Int -- Unit of tremolo amplitude and volume slides.
 type WaveEffectSpeed = Int -- Advance phase by this many 16ths of a period per row.
 type WordCount = Int
 
-data SampleInfo =
-    SampleInfo
-        { _sampleInfoName          :: ByteString
-        , _sampleInfoLength        :: WordCount
-        , _sampleInfoFinetune      :: Semitone8thDelta
-        , _sampleInfoDefaultVolume :: Volume
-        , _sampleInfoRepeatOffset  :: WordCount
-        , _sampleInfoRepeatLength  :: WordCount
+data Instrument =
+    Instrument
+        { _instrumentName          :: ByteString
+        , _instrumentLength        :: WordCount
+        , _instrumentFinetune      :: Semitone8thDelta
+        , _instrumentDefaultVolume :: Volume
+        , _instrumentRepeatOffset  :: WordCount
+        , _instrumentRepeatLength  :: WordCount
         }
     deriving (Eq, Ord, Show, Generic, NFData)
 
-makeFields ''SampleInfo
+makeFields ''Instrument
 
 type Waveform = Vector Int
 
-type SampleInfos = Array SampleIndex SampleInfo
-type SampleWaves = Array SampleIndex Waveform
+type Instruments = Array InstrumentIndex Instrument
+type Waveforms = Array InstrumentIndex Waveform
 
 data ContinuedEffect
     = ContinueSlide
@@ -112,7 +117,7 @@ data Effect
 
 data Instruction =
     Instruction
-        { _instructionSample :: SampleIndex
+        { _instructionInstrumnet :: InstrumentIndex
         , _instructionPeriod :: Period
         , _instructionEffect :: Effect
         }
@@ -125,13 +130,15 @@ type Pattern = Array RowIndex Row
 
 data Module =
     Module
-        { title             :: ByteString
-        , sampleInfos       :: SampleInfos
-        , songPositionCount :: Int
-        , restartPosition   :: SongPosition
-        , patternTable      :: Array SongPosition PatternIndex
-        , patterns          :: Array PatternIndex Pattern
-        , sampleWaves       :: SampleWaves
-        , channelCount      :: Int
+        { _moduleTitle             :: ByteString
+        , _moduleInstruments       :: Instruments
+        , _moduleSongPositionCount :: Int
+        , _moduleRestartPosition   :: SongPosition
+        , _modulePatternTable      :: Array SongPosition PatternIndex
+        , _modulePatterns          :: Array PatternIndex Pattern
+        , _moduleWaveforms         :: Waveforms
+        , _moduleChannelCount      :: Int
         }
     deriving (Eq, Ord, Show, Generic, NFData)
+
+makeFields ''Module

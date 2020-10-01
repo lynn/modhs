@@ -20,20 +20,15 @@ import           Lens.Micro
 pSignature :: Parser ()
 pSignature = void $ P.choice $ map P.string ["M.K.", "4CHN", "M!K!", "FLT4"]
 
-pSampleInfo :: Parser SampleInfo
-pSampleInfo = do
-    sName         <- P.take 22
-    sLength       <- P.u16
-    sFinetune     <- P.u8
-    sVolume       <- P.u8
-    sRepeatOffset <- P.u16
-    sRepeatLength <- P.u16
-    pure $ SampleInfo sName
-                      sLength
-                      sFinetune
-                      sVolume
-                      sRepeatOffset
-                      sRepeatLength
+pInstrument :: Parser Instrument
+pInstrument =
+    Instrument
+        <$> P.take 22 -- name
+        <*> P.u16 -- length
+        <*> P.u8 -- finetune
+        <*> P.u8 -- volume
+        <*> P.u16 -- repeatOffset
+        <*> P.u16 -- repeatLength
 
 pArray :: (Ix i, Num i) => i -> Int -> Parser a -> Parser (Array i a)
 pArray start count p =
@@ -74,13 +69,13 @@ pInstruction = do
     wx <- P.u16
     ye <- P.u8
     a  <- P.u8
-    let w      = shiftR wx 12
-    let y      = shiftR ye 4
-    let e      = ye .&. 0x0F
-    let sample = shiftL w 4 .|. y
-    let period = wx .&. 0x0FFF
-    let effect = decodeEffect e a
-    pure $ Instruction sample period effect
+    let w  = shiftR wx 12
+    let y  = shiftR ye 4
+    let e  = ye .&. 0x0F
+    let ii = shiftL w 4 .|. y
+    let ip = wx .&. 0x0FFF
+    let ie = decodeEffect e a
+    pure $ Instruction ii ip ie
 
 pRow :: Parser Row
 pRow = pArray 0 4 pInstruction
@@ -90,21 +85,21 @@ pPattern = pArray 0 64 pRow
 
 pModule :: Parser Module
 pModule = do
-    title             <- P.take 20
-    sampleInfos       <- pArray 1 31 pSampleInfo <|> pArray 1 15 pSampleInfo
-    songPositionCount <- P.u8
-    restartPosition   <- P.u8
-    patternTable      <- pArray 0 128 P.u8
+    mTitle             <- P.take 20
+    mInstruments       <- pArray 1 31 pInstrument <|> pArray 1 15 pInstrument
+    mSongPositionCount <- P.u8
+    mRestartPosition   <- P.u8
+    mPatternTable      <- pArray 0 128 P.u8
     pSignature
-    let patternCount = maximum patternTable + 1
-    patterns <- pArray 0 patternCount pPattern
-    samples  <- forM sampleInfos $ \si -> V.replicateM (si ^. length) P.i16
-    let channelCount = 4
-    pure $ Module title
-                  sampleInfos
-                  songPositionCount
-                  restartPosition
-                  patternTable
-                  patterns
-                  samples
-                  channelCount
+    let patternCount = maximum mPatternTable + 1
+    mPatterns  <- pArray 0 patternCount pPattern
+    mWaveforms <- forM mInstruments $ \i -> V.replicateM (i ^. length) P.i16
+    let mChannelCount = 4
+    pure $ Module mTitle
+                  mInstruments
+                  mSongPositionCount
+                  mRestartPosition
+                  mPatternTable
+                  mPatterns
+                  mWaveforms
+                  mChannelCount
